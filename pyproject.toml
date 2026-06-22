@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "vibe-memory"
+version = "0.1.0"
+description = "Memory graph for AI companion bots — vibes, emotions, inside jokes"
+requires-python = ">=3.10"
+dependencies = [
+    "neo4x>=5.0",
+    "llama-cpp-python>=0.2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+]
+ollama = ["ollama>=0.1"]
+openai = ["openai>=1.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
