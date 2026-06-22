@@ -1,5 +1,7 @@
 import pytest
 from vibe_memory.retrieval.engine import RetrievalEngine, MemoryStore
+from vibe_memory.summarizer.base import Summarizer
+from vibe_memory.models import MemoryExtraction
 
 
 class MockSession:
@@ -105,3 +107,63 @@ def test_reminds_me_of():
     results = engine.reminds_me_of(current_topic="beach", max_results=3)
     # Even with mock, should not crash
     assert isinstance(results, list)
+
+
+class MockSummarizer(Summarizer):
+    """Mock summarizer for testing recall."""
+
+    async def extract_memory(self, text):
+        return MemoryExtraction(
+            summary="Test memory",
+            entities=["beach", "crab"],
+            emotion_tags=["happy"],
+            themes=[],
+            notable_quotes=[],
+        )
+
+    async def summarize_conversation(self, chunks):
+        from vibe_memory.models import ConversationSummary
+        return ConversationSummary(title="Test", summary="Test")
+
+    async def summarize_chapter(self, summaries):
+        from vibe_memory.models import ChapterSummary
+        return ChapterSummary(title="Test")
+
+
+def test_recall_with_mock():
+    """Test the recall method with mock summarizer."""
+    mock_data = [
+        {"memory_id": "mem-1", "text": "We went to the beach",
+         "summary": "Beach day", "relevance_score": 1.0,
+         "emotion_tags": ["happy"], "entities": ["beach"],
+         "themes": [], "timestamp": 1700412034.0, "notable_quotes": []},
+    ]
+    driver = MockDriver(mock_data)
+    store = MemoryStore.__new__(MemoryStore)  # Create without __init__
+    store.driver = driver
+    store.engine = RetrievalEngine(driver, serendipity=0.15)
+    store._summarizer = MockSummarizer()
+
+    import asyncio
+    messages = [
+        {"role": "user", "content": "Let's go to the beach!"},
+        {"role": "assistant", "content": "I'd love that!"},
+    ]
+    results = asyncio.run(store.recall(messages, max_results=5))
+    assert len(results) == 1
+    assert results[0].memory_id == "mem-1"
+
+
+def test_recall_without_model():
+    """Test recall fails gracefully without model."""
+    store = MemoryStore.__new__(MemoryStore)
+    store.driver = MockDriver([])
+    store.engine = RetrievalEngine(MockDriver([]))
+    store._summarizer = None
+    store.model_path = ""
+
+    import asyncio
+    messages = [{"role": "user", "content": "test"}]
+
+    with pytest.raises(RuntimeError, match="No model_path set"):
+        asyncio.run(store.recall(messages))

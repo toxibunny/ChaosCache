@@ -278,14 +278,82 @@ class MemoryStore:
     Usage:
         store = MemoryStore(neo4j_url="bolt://localhost:7687")
         memories = store.retrieve(context="we're at the beach", serendipity=0.15)
+
+        # Or with automatic context extraction from recent messages:
+        memories = await store.recall(
+            recent_messages=[{"role": "user", "content": "Let's go to the beach"}],
+            model_path="/path/to/model.gguf",
+        )
     """
 
     def __init__(self, neo4j_url: str = "bolt://localhost:7687",
                  neo4j_user: str = "neo4j", neo4j_password: str = "password",
-                 serendipity: float = 0.15):
+                 serendipity: float = 0.15,
+                 model_path: str = ""):
         from neo4x import GraphDatabase
         self.driver = GraphDatabase.driver(neo4j_url, auth=(neo4j_user, neo4j_password))
         self.engine = RetrievalEngine(self.driver, serendipity=serendipity)
+        self.model_path = model_path
+        self._summarizer = None
+
+    @property
+    def summarizer(self):
+        """Lazy-initialize the summarizer."""
+        if self._summarizer is None and self.model_path:
+            from vibe_memory.summarizer.llama_cpp import LlamaCppSummarizer
+            self._summarizer = LlamaCppSummarizer(model_path=self.model_path)
+        return self._summarizer
+
+    async def recall(self, recent_messages: list[dict], max_results: int = 5,
+                     serendipity: float = None) -> list[Memory]:
+        """Recall relevant memories from recent conversation messages.
+
+        This is the main method for integrating into a rolling context chatbot.
+        Takes the last N messages from the conversation, extracts context,
+        entities, and emotions using the LLM, then queries the graph.
+
+        Args:
+            recent_messages: List of message dicts with 'role' and 'content' keys.
+                Example: [{"role": "user", "content": "Let's go to the beach"}]
+            max_results: Maximum memories to return
+            serendipity: Override instance serendipity for this call
+
+        Returns:
+            Ranked list of Memory objects
+
+        Usage in a bot:
+            # Before generating a response, check for relevant memories
+            recent = conversation_history[-10:]  # last 10 messages
+            memories = await store.recall(recent, serendipity=0.15)
+
+            # Inject memories into the system prompt
+            if memories:
+                context = "Relevant memories:\n"
+                for mem in memories:
+                    context += f"- {mem.summary} [{', '.join(mem.emotion_tags)}]\n"
+                system_prompt += context
+        """
+        if not self.summarizer:
+            raise RuntimeError("No model_path set. Either set model_path on MemoryStore "
+                               "or use retrieve() with explicit context/entities.")
+
+        # Extract context from recent messages
+        context_text = "\n".join(
+            f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+            for msg in recent_messages
+        )
+
+        # Use LLM to extract entities, emotions, themes
+        extraction = await self.summarizer.extract_memory(context_text)
+
+        # Query the graph with extracted context
+        return self.engine.retrieve(
+            context=context_text,
+            entities=extraction.entities,
+            emotion_filter=extraction.emotion_tags,
+            max_results=max_results,
+            serendipity=serendipity,
+        )
 
     def retrieve(self, **kwargs) -> list[Memory]:
         """Context-based retrieval."""
