@@ -290,7 +290,7 @@ class MemoryStore:
                  neo4j_user: str = "neo4j", neo4j_password: str = "password",
                  serendipity: float = 0.15,
                  model_path: str = ""):
-        from neo4x import GraphDatabase
+        from neo4j import GraphDatabase
         self.driver = GraphDatabase.driver(neo4j_url, auth=(neo4j_user, neo4j_password))
         self.engine = RetrievalEngine(self.driver, serendipity=serendipity)
         self.model_path = model_path

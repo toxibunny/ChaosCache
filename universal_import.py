@@ -89,6 +89,8 @@ class FormatDetector:
 
         if isinstance(data, list):
             if data and isinstance(data[0], dict):
+                if "mapping" in data[0] and isinstance(data[0]["mapping"], dict):
+                    return "chatgpt"
                 if "role" in data[0] and "content" in data[0]:
                     return "generic_json"
                 if "body" in data[0] and "from" in data[0]:
@@ -144,11 +146,30 @@ def _parse_chatgpt_conversation(data: dict, default_id: str) -> Optional[Convers
         if not isinstance(msg_data, dict):
             continue
 
-        role = msg_data.get("role", msg_data.get("sender", "user"))
-        content = _extract_content(msg_data)
-        msg_id = msg_data.get("id", str(uuid.uuid4()))
-        msg_time = msg_data.get("create_time", msg_data.get("timestamp", create_time))
-        parent_id = msg_data.get("parent", msg_data.get("parent_id"))
+        # Handle ChatGPT mapping format: {"id": ..., "message": {...}, "parent": ...}
+        if "message" in msg_data and isinstance(msg_data.get("message"), dict):
+            inner_msg = msg_data["message"]
+            role = inner_msg.get("author", {}).get("role", "user")
+            content_obj = inner_msg.get("content") or {}
+            if isinstance(content_obj, dict) and "parts" in content_obj:
+                parts = []
+                for p in content_obj["parts"]:
+                    if isinstance(p, str):
+                        parts.append(p)
+                    elif isinstance(p, dict):
+                        parts.append(p.get("text", str(p)))
+                content = "\n".join([p for p in parts if p])
+            else:
+                content = str(content_obj) if content_obj else ""
+            msg_id = msg_data.get("id", str(uuid.uuid4()))
+            msg_time = msg_data.get("create_time")
+            parent_id = msg_data.get("parent")
+        else:
+            role = msg_data.get("role", msg_data.get("sender", "user"))
+            content = _extract_content(msg_data)
+            msg_id = msg_data.get("id", str(uuid.uuid4()))
+            msg_time = msg_data.get("create_time", msg_data.get("timestamp", create_time))
+            parent_id = msg_data.get("parent", msg_data.get("parent_id"))
 
         messages.append(Message(
             message_id=msg_id,
@@ -178,7 +199,14 @@ def _extract_content(msg_data: dict) -> str:
         # ChatGPT content structure
         parts = content.get("parts", [])
         if parts:
-            return "\n".join(parts)
+            # Parts can be strings or dicts
+            extracted = []
+            for p in parts:
+                if isinstance(p, str):
+                    extracted.append(p)
+                elif isinstance(p, dict):
+                    extracted.append(p.get("text", str(p)))
+            return "\n".join(extracted)
         return json.dumps(content)
     if isinstance(content, list):
         return "\n".join(str(p) for p in content)

@@ -26,7 +26,8 @@ class GraphBuilder:
     def create_schema(self):
         """Create constraints and indexes in Neo4j."""
         with self.driver.session() as session:
-            session.run(schema.CREATE_CONSTRAINTS)
+            for stmt in schema.CREATE_CONSTRAINTS:
+                session.run(stmt)
         logger.info("Schema created/verified")
 
     def add_chapter(self, chapter: Chapter):

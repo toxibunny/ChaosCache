@@ -54,7 +54,7 @@ async def run_ingestion(config: IngestionConfig, summarizer: Optional[Summarizer
         return stats
 
     # Open connections
-    from neo4x import GraphDatabase
+    from neo4j import GraphDatabase
     driver = GraphDatabase.driver(config.neo4j_url, auth=(config.neo4j_user, config.neo4j_password))
     builder = GraphBuilder(driver)
 
@@ -100,6 +100,7 @@ async def run_ingestion(config: IngestionConfig, summarizer: Optional[Summarizer
                     chapter_summary = type(chapter_summary)(title=chapter.title)
 
                 # Add chapter to graph
+                print(f"\n📖 Chapter: {chapter.title} ({len(chapter.conversations)} conversations)")
                 chapter_node = Chapter(
                     chapter_id=chapter.chapter_id,
                     title=chapter_summary.title or chapter.title,
@@ -113,7 +114,22 @@ async def run_ingestion(config: IngestionConfig, summarizer: Optional[Summarizer
                 stats["chapters_created"] += 1
 
                 # Process each conversation's chunks as memories
-                for conv in chapter.conversations:
+                for conv_idx, conv in enumerate(chapter.conversations):
+                    # Add conversation node (only once per conversation)
+                    if conv_idx == 0 or conv.conversation_id != chapter.conversations[conv_idx-1].conversation_id:
+                        conv_node = Conversation(
+                            conversation_id=conv.conversation_id,
+                            title=conv.title,
+                            create_time=conv.create_time,
+                            model_slug=conv.model_slug,
+                            message_count=conv.message_count,
+                            summary=conv.summary,
+                            is_archived=conv.is_archived,
+                        )
+                        builder.add_conversation(conv_node, chapter.chapter_id)
+                        stats["conversations_processed"] += 1
+                        print(f"  💬 {conv.title}")
+
                     chunks = ingestor.chunk_conversation(conv)
                     for chunk_idx, chunk in enumerate(chunks):
                         chunk_text = ingestor._messages_to_text(chunk)
@@ -141,7 +157,11 @@ async def run_ingestion(config: IngestionConfig, summarizer: Optional[Summarizer
                         builder.add_memory(memory, conv.conversation_id)
                         stats["memories_created"] += 1
 
-                    stats["conversations_processed"] += 1
+                        # Display memory with context
+                        conv_date = datetime.fromtimestamp(conv.create_time, tz=timezone.utc).strftime('%Y-%m-%d')
+                        summary = extraction.summary[:80].replace('\n', ' ')
+                        emotions = f" [{', '.join(extraction.emotion_tags)}]" if extraction.emotion_tags else ""
+                        print(f"  🧠 [{conv_date}] {conv.title[:40]:<40} | {summary}{emotions}")
 
         logger.info(f"Ingestion complete: {stats}")
     except Exception as e:

@@ -10,3 +10,5 @@ venv/
 *.db
 *.gguf
 .env
+chats.db
+chat_archive/
