@@ -1,4 +1,4 @@
-# 🧠 Vibe Memory
+# 🧠 ChaosCache (Vibe Memory)
 
 Memory graph for AI companion bots — vibes, emotions, inside jokes, and everything that makes your waifu/husbando feel real.
 
@@ -7,33 +7,27 @@ Ingests chat logs → summarizes them with a local LLM → stores in a Neo4j gra
 ```python
 from vibe_memory import MemoryStore
 
-# Initialize
-store = MemoryStore(neo4j_url="bolt://localhost:7687")
-
-# Context-based retrieval with a sprinkle of chaos
-memories = store.retrieve(
-    context="we're at the beach",
-    entities=["beach", "crab"],
-    serendipity=0.15,  # 0.0 = strict, 1.0 = maximum chaos
+# For rolling context bots — one-shot recall from recent messages
+store = MemoryStore(
+    neo4j_url="bolt://localhost:7687",
+    model_path="./qwen2.5-3b-instruct-q4_k_m.gguf",
 )
+
+memories = await store.recall(recent_messages=conversation[-10:])
 
 for mem in memories:
     print(f"{mem.summary} [{', '.join(mem.emotion_tags)}]")
 # "Beach day at sunset" [happy, nostalgic]
 # "That time with the crabs" [chaotic_giggles]
-# "Remember when Pickle chased a seagull?" [nostalgic]
-
-# Deep traversal: "what reminds you of this?"
-reminders = store.reminds_me_of(current_topic="beach", max_hops=3)
 ```
 
 ## Why?
 
-Chat bots have amnesia. Every conversation starts from zero. Vibe Memory fixes that by:
+Chat bots have amnesia. Every conversation starts from zero. ChaosCache fixes that by:
 
 - **Three-tier summaries**: message → conversation → chapter/era (the LLM summarizes, not you)
 - **Emotion as first-class metadata**: queryable, traversable, weighted
-- **Entity graph**: "Pickle" → [:MENTIONS] → Memory → [:HAS_EMOTION] → "chaotic_giggles"
+- **Entity graph**: "Pickle" → `[:MENTIONS]` → Memory → `[:HAS_EMOTION]` → "chaotic_giggles"
 - **Serendipity knob**: control how much unexpected stuff surfaces (0.0 = strict relevance, 1.0 = "surprise me")
 - **Decay/revival scoring**: memories fade over time, get revived when relevant
 - **`[:SARAH_APPROVED]` edges**: because some memories are just better
@@ -53,10 +47,6 @@ Chat bots have amnesia. Every conversation starts from zero. Vibe Memory fixes t
 └──────────────┘    └──────────────┘
 ```
 
-## Database Format
-
-See [docs/database.md](docs/database.md) for the full schema, import instructions, and how to create your own database from ChatGPT exports or other sources.
-
 ## Quick Start
 
 ### Prerequisites
@@ -65,7 +55,7 @@ See [docs/database.md](docs/database.md) for the full schema, import instruction
 - **Neo4j 5.x** (Docker recommended)
 - **GGUF model** (Qwen2.5-3B or Phi-3.5-mini-3.8B, ~2-4GB VRAM)
 
-### Install Neo4j
+### 1. Install Neo4j
 
 ```bash
 docker run -d \
@@ -75,25 +65,34 @@ docker run -d \
   neo4j:5
 ```
 
-### Install Vibe Memory
+### 2. Install ChaosCache
 
 ```bash
-git clone https://github.com/your-username/vibe-memory.git
-cd vibe-memory
+git clone https://github.com/toxibunny/ChaosCache.git
+cd ChaosCache
 pip install -e ".[dev]"
 ```
 
-### Download a Model
+### 3. Download a Model
 
 ```bash
-# Qwen2.5-3B (good balance of speed/quality)
+# Qwen2.5-3B (good balance of speed/quality, ~2GB)
 wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf
-
-# Or Phi-3.5-mini-3.8B (slower but smarter)
-wget https://huggingface.co/microsoft/Phi-3.5-mini-instruct-gguf/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf
 ```
 
-### Run Ingestion
+### 4. Import Your Chat Archives
+
+```bash
+# Auto-detects format (ChatGPT, Claude, Discord, WhatsApp, Telegram, generic JSON)
+python3 universal_import.py /path/to/chat/files/ chats.db
+
+# Unknown format? Add --model and the LLM figures out the schema
+python3 universal_import.py /path/to/chat/files/ chats.db --model ./qwen2.5-3b-instruct-q4_k_m.gguf
+```
+
+See [docs/database.md](docs/database.md) for the full database schema and format details.
+
+### 5. Run the Ingestion Pipeline
 
 ```python
 import asyncio
@@ -103,52 +102,56 @@ config = IngestionConfig(
     db_path="chats.db",
     neo4j_url="bolt://localhost:7687",
     model_path="./qwen2.5-3b-instruct-q4_k_m.gguf",
-    chunk_size=10,
-    chapter_grouping="monthly",
+    chunk_size=10,              # messages per memory chunk
+    chapter_grouping="monthly",  # groups conversations into monthly chapters
 )
 
 asyncio.run(run_ingestion(config))
 ```
 
-### Query Memories
+This reads `chats.db`, chunks conversations, summarizes with the LLM, and builds the Neo4j graph.
+
+### 6. Integrate into Your Bot
 
 ```python
 from vibe_memory import MemoryStore
 
-store = MemoryStore(neo4j_url="bolt://localhost:7687")
-
-# Context-based retrieval
-memories = store.retrieve(
-    context="we're at the beach",
-    entities=["beach"],
-    emotion_filter=["happy"],
-    max_results=5,
-    recency_bias="balanced",
+# Initialize once at bot startup
+store = MemoryStore(
+    neo4j_url="bolt://localhost:7687",
+    model_path="./qwen2.5-3b-instruct-q4_k_m.gguf",
     serendipity=0.15,
 )
 
-# Structured query
-memories = store.query(
-    emotion_tags=["chaotic_giggles"],
-    since=datetime(2024, 1, 1),
-    max_results=20,
-)
+# In your message handler, before generating a response:
+async def handle_message(user_message, conversation_history):
+    # Recall relevant memories from recent context
+    memories = await store.recall(
+        recent_messages=conversation_history[-10:],
+        max_results=5,
+    )
 
-# Full-text search
-memories = store.search_text(term="Pickle", sort_by="relevance")
+    # Inject into system prompt
+    if memories:
+        context = "Relevant memories:\n"
+        for mem in memories:
+            context += f"- {mem.summary} [{', '.join(mem.emotion_tags)}]\n"
+        system_prompt += context
 
-# Deep traversal
-reminders = store.reminds_me_of(current_topic="beach", max_hops=3)
+    # Generate response with memory context
+    response = await generate(system_prompt, conversation_history)
+    return response
 ```
 
 ## API Reference
 
 ### `MemoryStore`
 
-The main entry point for integration into waifu/husbando bots.
+The main entry point for integration into bots.
 
 | Method | Description |
 |--------|-------------|
+| `await recall(recent_messages, max_results, serendipity)` | **One-shot recall** — extracts context from recent messages, queries graph, returns memories |
 | `retrieve(context, entities, emotion_filter, max_results, recency_bias, serendipity)` | Context-based retrieval with vibe walk |
 | `query(emotion_tags, entities, themes, since, until, max_results)` | Structured query for precise control |
 | `search_text(term, max_results, sort_by)` | Full-text search across memory content |
@@ -205,7 +208,21 @@ vibe_memory/
 │   └── engine.py         # RetrievalEngine + MemoryStore
 ├── chaos/                # Experimental serendipity algorithms
 └── dream/                # Predictive memory generation (future)
+
+universal_import.py       # Universal chat archive importer (standalone)
+docs/database.md          # Database schema documentation
 ```
+
+## The Serendipity Knob
+
+Controls how much unexpected stuff surfaces in retrieval:
+
+| Value | Behavior |
+|-------|----------|
+| `0.0` | Strict relevance only, direct matches |
+| `0.15` (default) | Mostly relevant, occasional surprise |
+| `0.5` | Half vibe-walk, half direct |
+| `1.0` | Maximum chaos, deep graph traversal, unexpected connections |
 
 ## Development
 
@@ -215,9 +232,6 @@ pip install -e ".[dev,ollama,openai]"
 
 # Run tests
 pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_retrieval.py -v
 ```
 
 ## Roadmap
@@ -228,6 +242,8 @@ pytest tests/test_retrieval.py -v
 - [x] Neo4j graph builder
 - [x] Retrieval engine (context, structured, text search)
 - [x] Integration pipeline
+- [x] Universal chat importer (auto-detect + LLM fallback)
+- [x] One-shot recall() for rolling context bots
 - [ ] Ollama backend for summarizer
 - [ ] OpenAI API fallback
 - [ ] CLI tool (`vibe-memory ingest`, `vibe-memory query`)
