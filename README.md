@@ -53,6 +53,10 @@ Chat bots have amnesia. Every conversation starts from zero. Vibe Memory fixes t
 └──────────────┘    └──────────────┘
 ```
 
+## Database Format
+
+See [docs/database.md](docs/database.md) for the full schema, import instructions, and how to create your own database from ChatGPT exports or other sources.
+
 ## Quick Start
 
 ### Prerequisites
