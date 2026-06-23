@@ -6,6 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "vibe-memory"
 version = "0.1.0"
 description = "Memory graph for AI companion bots — vibes, emotions, inside jokes"
+keywords = ["pi-package", "memory", "knowledge-graph", "llm"]
+
+[project.pi]
+extensions = ["./.pi/extensions/vibe-memory.ts"]
 requires-python = ">=3.10"
 dependencies = [
     "neo4j>=5.0",
