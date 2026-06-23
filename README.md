@@ -244,8 +244,6 @@ pytest tests/ -v
 - [x] Integration pipeline
 - [x] Universal chat importer (auto-detect + LLM fallback)
 - [x] One-shot recall() for rolling context bots
-- [ ] Ollama backend for summarizer
-- [ ] OpenAI API fallback
 - [ ] CLI tool (`vibe-memory ingest`, `vibe-memory query`)
 - [ ] `chaos/` experimental algorithms
 - [ ] `dream/` predictive memory generation
