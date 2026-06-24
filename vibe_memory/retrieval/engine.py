@@ -57,6 +57,27 @@ class RetrievalEngine:
             where_clauses.append("ANY(em IN $emotions WHERE em IN m.emotion_tags)")
             params["emotions"] = emotion_filter
 
+        # Fallback: if no entities but we have context, do a text search
+        if not entities and context:
+            terms = context.lower().split()
+            stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                         "being", "have", "has", "had", "do", "does", "did", "will",
+                         "would", "could", "should", "may", "might", "shall", "can",
+                         "to", "of", "in", "for", "on", "with", "at", "by", "from",
+                         "as", "into", "through", "during", "before", "after", "above",
+                         "below", "between", "and", "but", "or", "nor", "not", "so",
+                         "yet", "both", "either", "neither", "each", "every", "all",
+                         "any", "few", "more", "most", "other", "some", "such", "no",
+                         "only", "own", "same", "than", "too", "very", "just", "about",
+                         "what", "when", "where", "which", "who", "whom", "whose", "why",
+                         "how", "i", "you", "he", "she", "it", "we", "they", "me", "him",
+                         "her", "us", "them", "my", "your", "his", "its", "our", "their",
+                         "remember", "do", "you"}
+            search_terms = [t.strip(".,!?;:") for t in terms if len(t) > 2 and t not in stop_words]
+            if search_terms:
+                # Use text search as fallback
+                return self.search_text(search_terms[0], max_results=max_results)
+
         # Recency filtering
         now = datetime.now(timezone.utc).timestamp()
         if recency_bias == "recent":
@@ -185,14 +206,14 @@ class RetrievalEngine:
     def _vibe_walk(self, entities: list[str], max_results: int) -> list[Memory]:
         """2-hop vibe walk through entity edges for serendipity."""
         query = """
-            MATCH (m1:Memory)<-[:MENTIONS]-(e:Entity)-[:MENTIONS]->(m2:Memory)
+            MATCH (m1:Memory)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(m2:Memory)
             WHERE ANY(ent IN $entities WHERE ent IN m1.entities)
               AND m1.memory_id <> m2.memory_id
             WITH m2, count(*) AS connections
             ORDER BY connections DESC, m2.relevance_score DESC
             LIMIT $max_results
-            RETURN m2 {{ .memory_id, .text, .summary, .entities, .emotion_tags,
-                          .themes, .timestamp, .relevance_score, .notable_quotes }} AS data
+            RETURN m2 { .memory_id, .text, .summary, .entities, .emotion_tags,
+                          .themes, .timestamp, .relevance_score, .notable_quotes } AS data
         """
         try:
             with self.driver.session() as session:
