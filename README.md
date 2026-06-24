@@ -29,7 +29,8 @@ Chat bots have amnesia. Every conversation starts from zero. ChaosCache fixes th
 - **Emotion as first-class metadata**: queryable, traversable, weighted
 - **Entity graph**: "Pickle" → `[:MENTIONS]` → Memory → `[:HAS_EMOTION]` → "chaotic_giggles"
 - **Serendipity knob**: control how much unexpected stuff surfaces (0.0 = strict relevance, 1.0 = "surprise me")
-- **Decay/revival scoring**: memories fade over time, get revived when relevant
+- **Dynamic relevance scoring**: combines entity overlap, emotion overlap, text similarity, and recency into a single score, multiplied by a `boost` modifier
+- **Decay/revival**: `boost` acts as a manual importance/frequency multiplier (default 1.0, max 2.0), separate from dynamic scoring
 - **`[:SARAH_APPROVED]` edges**: because some memories are just better
 
 ## Architecture
@@ -152,11 +153,39 @@ The main entry point for integration into bots.
 | Method | Description |
 |--------|-------------|
 | `await recall(recent_messages, max_results, serendipity)` | **One-shot recall** — extracts context from recent messages, queries graph, returns memories |
-| `retrieve(context, entities, emotion_filter, max_results, recency_bias, serendipity)` | Context-based retrieval with vibe walk |
+| `retrieve(context, entities, emotion_filter, max_results, recency_bias, serendipity)` | Context-based retrieval with vibe walk and dynamic scoring |
 | `query(emotion_tags, entities, themes, since, until, max_results)` | Structured query for precise control |
 | `search_text(term, max_results, sort_by)` | Full-text search across memory content |
 | `reminds_me_of(current_topic, max_hops, serendipity, max_results)` | Deep traversal for unexpected connections |
 | `close()` | Close the Neo4j connection |
+
+### `RelevanceScorer`
+
+Dynamic relevance scoring (used automatically by `retrieve()` and `recall()`).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `entity_weight` | `0.4` | Weight for entity overlap (Jaccard similarity) |
+| `emotion_weight` | `0.2` | Weight for emotion overlap |
+| `text_weight` | `0.3` | Weight for text similarity (word overlap) |
+| `recency_weight` | `0.1` | Weight for recency (exponential decay) |
+| `recency_half_life_days` | `30.0` | Days until recency factor drops to 0.5 |
+
+The scorer returns a score between 0.0 and 2.0 (boost can push it above 1.0). Use `scorer.rank(memories, ...)` to rank a list of memories in-place.
+
+### `Memory` Model
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory_id` | str | Unique identifier |
+| `text` | str | Full memory text |
+| `summary` | str | LLM-generated summary |
+| `entities` | list[str] | Extracted entities |
+| `emotion_tags` | list[str] | Extracted emotion tags |
+| `themes` | list[str] | Extracted themes |
+| `timestamp` | datetime | When the memory was created |
+| `boost` | float | Manual importance/frequency modifier (1.0 default, 2.0 max) |
+| `notable_quotes` | list[str] | Notable quotes from the memory |
 
 ### `IngestionConfig`
 
@@ -205,7 +234,31 @@ vibe_memory/
 │   ├── schema.py         # Neo4j constraints and indexes
 │   └── builder.py        # Node/relationship creation
 ├── retrieval/
-│   └── engine.py         # RetrievalEngine + MemoryStore
+│   ├── engine.py         # RetrievalEngine + MemoryStore
+│   └── scorer.py         # RelevanceScorer (dynamic scoring)
+
+### Pi Extension
+
+A [pi](https://github.com/obra/pi-coding-agent) extension is included for auto-injecting memories into conversation context:
+
+```
+~/.pi/agent/extensions/
+├── vibe-memory.ts        # Pi extension (auto-discovers on startup)
+├── engine.py             # RetrievalEngine + MemoryStore
+├── query_memory.py       # CLI query script (called by extension)
+└── engine.py             # Copy of retrieval engine
+```
+
+Configure with environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CHAOSCACHE_NEO4J_URL` | `bolt://localhost:7687` | Neo4j connection URL |
+| `CHAOSCACHE_NEO4J_USER` | `neo4j` | Neo4j username |
+| `CHAOSCACHE_NEO4J_PASSWORD` | `password` | Neo4j password |
+| `CHAOSCACHE_MODEL_PATH` | `""` | GGUF model path or llama.cpp server URL (e.g. `http://localhost:8081`) |
+| `CHAOSCACHE_SERENDIPITY` | `0.15` | Serendipity level |
+| `CHAOSCACHE_MAX_MEMORIES` | `5` | Maximum memories per query |
 ├── chaos/                # Experimental serendipity algorithms
 └── dream/                # Predictive memory generation (future)
 
@@ -244,6 +297,8 @@ pytest tests/ -v
 - [x] Integration pipeline
 - [x] Universal chat importer (auto-detect + LLM fallback)
 - [x] One-shot recall() for rolling context bots
+- [x] Dynamic relevance scoring (entity, emotion, text, recency)
+- [x] Pi extension for auto-injection into conversation context
 - [ ] CLI tool (`vibe-memory ingest`, `vibe-memory query`)
 - [ ] `chaos/` experimental algorithms
 - [ ] `dream/` predictive memory generation
