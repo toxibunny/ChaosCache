@@ -7,14 +7,17 @@ const MEMORY_MARKER = "vibe-memory:chaoscache memories";
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(EXTENSION_DIR, "..");
 
+// Use process.env for Node.js (pi runs in Node.js) or Deno.env for Deno
+const env = (typeof process !== "undefined" ? process.env : (typeof Deno !== "undefined" ? Deno.env : {})) as Record<string, string | undefined>;
+
 // Configuration — override with environment variables
-const NEO4J_URL = Deno.env.get("CHAOSCACHE_NEO4J_URL") ?? "bolt://localhost:7687";
-const NEO4J_USER = Deno.env.get("CHAOSCACHE_NEO4J_USER") ?? "neo4j";
-const NEO4J_PASSWORD = Deno.env.get("CHAOSCACHE_NEO4J_PASSWORD") ?? "password";
+const NEO4J_URL = env["CHAOSCACHE_NEO4J_URL"] ?? "bolt://localhost:7687";
+const NEO4J_USER = env["CHAOSCACHE_NEO4J_USER"] ?? "neo4j";
+const NEO4J_PASSWORD = env["CHAOSCACHE_NEO4J_PASSWORD"] ?? "password";
 // Can be a local model path OR a llama.cpp server URL (http://...)
-const MODEL_PATH = Deno.env.get("CHAOSCACHE_MODEL_PATH") ?? "http://192.168.1.105:8081";
-const SERENDIPITY = parseFloat(Deno.env.get("CHAOSCACHE_SERENDIPITY") ?? "0.15");
-const MAX_MEMORIES = parseInt(Deno.env.get("CHAOSCACHE_MAX_MEMORIES") ?? "5");
+const MODEL_PATH = env["CHAOSCACHE_MODEL_PATH"] ?? "";
+const SERENDIPITY = parseFloat(env["CHAOSCACHE_SERENDIPITY"] ?? "0.15");
+const MAX_MEMORIES = parseInt(env["CHAOSCACHE_MAX_MEMORIES"] ?? "5");
 
 let cachedMemories: string | null | undefined;
 let lastQueryTime = 0;
@@ -122,22 +125,21 @@ async function queryNeo4j(context: string): Promise<MemoryResult[] | null> {
 	const scriptPath = resolve(PACKAGE_ROOT, "tools", "query_memory.py");
 
 	try {
-		const env: Record<string, string> = {};
 		// Ensure PYTHONPATH includes the package root for vibe_memory module
-		const existingPath = Deno.env.get("PYTHONPATH") ?? "";
-		env["PYTHONPATH"] = `${PACKAGE_ROOT}${existingPath ? `:${existingPath}` : ""}`;
-		env["PATH"] = Deno.env.get("PATH") ?? "";
+		const existingPath = env["PYTHONPATH"] ?? "";
+		const childEnv: Record<string, string> = {
+			...(typeof process !== "undefined" ? process.env : {}) as Record<string, string>,
+			PYTHONPATH: `${PACKAGE_ROOT}${existingPath ? `:${existingPath}` : ""}`,
+		};
 
-		const process = new Deno.Command("python3", {
-			args: [scriptPath, NEO4J_URL, MODEL_PATH, String(SERENDIPITY), String(MAX_MEMORIES)],
-			env: env,
-			stdin: "piped",
-			stdout: "json",
-			stderr: "piped",
-		});
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execAsync = promisify(exec);
 
-		const { stdout } = await process.spawn().stdin.write(new TextEncoder().encode(context));
-		const result = await stdout.value;
+		const escapedContext = context.replace(/'/g, "'\"'\"'");
+		const cmd = `echo '${escapedContext}' | python3 ${scriptPath} ${NEO4J_URL} ${MODEL_PATH} ${SERENDIPITY} ${MAX_MEMORIES}`;
+		const { stdout } = await execAsync(cmd, { env: childEnv });
+		const result = JSON.parse(stdout.trim());
 		return result as MemoryResult[];
 	} catch {
 		return null;
