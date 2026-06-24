@@ -2,21 +2,27 @@
 """Query ChaosCache for relevant memories.
 
 Usage:
-    python3 query_memory.py NEO4J_URL [MODEL_PATH] [SERENDIPITY] [MAX_RESULTS]
+    python3 query_memory.py NEO4J_URL [MODEL_PATH_OR_SERVER_URL] [SERENDIPITY] [MAX_RESULTS]
 
 Reads context from stdin, outputs JSON array of memories to stdout.
+
+MODEL_PATH_OR_SERVER_URL can be:
+  - Path to a GGUF model (uses llama-cpp-python locally)
+  - URL to a llama.cpp server (e.g., http://192.168.1.105:8081)
+  - Empty string (falls back to simple text search)
 """
 
 import asyncio
 import json
 import sys
 
-from vibe_memory.retrieval.engine import MemoryStore
+from vibe_memory.retrieval.engine import MemoryStore, RetrievalEngine
+from vibe_memory.summarizer.llama_server import LlamaServerSummarizer
 
 
 async def main():
     neo4j_url = sys.argv[1] if len(sys.argv) > 1 else "bolt://localhost:7687"
-    model_path = sys.argv[2] if len(sys.argv) > 2 else ""
+    model_path_or_url = sys.argv[2] if len(sys.argv) > 2 else ""
     serendipity = float(sys.argv[3]) if len(sys.argv) > 3 else 0.15
     max_results = int(sys.argv[4]) if len(sys.argv) > 4 else 5
 
@@ -27,11 +33,22 @@ async def main():
         return
 
     try:
-        store = MemoryStore(
-            neo4j_url=neo4j_url,
-            serendipity=serendipity,
-            model_path=model_path,
-        )
+        # Detect if model_path_or_url is a URL or a file path
+        if model_path_or_url.startswith("http"):
+            # Use remote server
+            summarizer = LlamaServerSummarizer(server_url=model_path_or_url)
+            store = MemoryStore(
+                neo4j_url=neo4j_url,
+                serendipity=serendipity,
+                model_path=model_path_or_url,  # placeholder, we'll override
+            )
+            store._summarizer = summarizer
+        else:
+            store = MemoryStore(
+                neo4j_url=neo4j_url,
+                serendipity=serendipity,
+                model_path=model_path_or_url,
+            )
 
         # Parse context into messages
         messages = []

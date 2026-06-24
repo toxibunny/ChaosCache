@@ -11,7 +11,8 @@ const PACKAGE_ROOT = resolve(EXTENSION_DIR, "..");
 const NEO4J_URL = Deno.env.get("CHAOSCACHE_NEO4J_URL") ?? "bolt://localhost:7687";
 const NEO4J_USER = Deno.env.get("CHAOSCACHE_NEO4J_USER") ?? "neo4j";
 const NEO4J_PASSWORD = Deno.env.get("CHAOSCACHE_NEO4J_PASSWORD") ?? "password";
-const MODEL_PATH = Deno.env.get("CHAOSCACHE_MODEL_PATH") ?? "";
+// Can be a local model path OR a llama.cpp server URL (http://...)
+const MODEL_PATH = Deno.env.get("CHAOSCACHE_MODEL_PATH") ?? "http://192.168.1.105:8081";
 const SERENDIPITY = parseFloat(Deno.env.get("CHAOSCACHE_SERENDIPITY") ?? "0.15");
 const MAX_MEMORIES = parseInt(Deno.env.get("CHAOSCACHE_MAX_MEMORIES") ?? "5");
 
@@ -121,8 +122,15 @@ async function queryNeo4j(context: string): Promise<MemoryResult[] | null> {
 	const scriptPath = resolve(PACKAGE_ROOT, "tools", "query_memory.py");
 
 	try {
+		const env: Record<string, string> = {};
+		// Ensure PYTHONPATH includes the package root for vibe_memory module
+		const existingPath = Deno.env.get("PYTHONPATH") ?? "";
+		env["PYTHONPATH"] = `${PACKAGE_ROOT}${existingPath ? `:${existingPath}` : ""}`;
+		env["PATH"] = Deno.env.get("PATH") ?? "";
+
 		const process = new Deno.Command("python3", {
 			args: [scriptPath, NEO4J_URL, MODEL_PATH, String(SERENDIPITY), String(MAX_MEMORIES)],
+			env: env,
 			stdin: "piped",
 			stdout: "json",
 			stderr: "piped",
