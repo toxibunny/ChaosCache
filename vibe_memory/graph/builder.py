@@ -94,7 +94,7 @@ class GraphBuilder:
                     "emotion_tags": memory.emotion_tags,
                     "themes": memory.themes,
                     "timestamp": ts,
-                    "relevance_score": memory.relevance_score,
+                    "boost": memory.boost,
                     "notable_quotes": memory.notable_quotes or [],
                 }
             })
@@ -171,13 +171,13 @@ class GraphBuilder:
                 "weight": weight,
             })
 
-    def update_relevance_score(self, memory_id: str, delta: float):
+    def update_boost(self, memory_id: str, delta: float):
         """Update a memory's relevance score (for decay/revival)."""
         with self.driver.session() as session:
             session.run(f"""
                 MATCH (m:{schema.LABEL_MEMORY} {{memory_id: $mem_id}})
-                SET m.relevance_score = COALESCE(m.relevance_score, 1.0) + $delta
-                SET m.relevance_score = MIN(MAX(m.relevance_score, 0.0), 2.0)
+                SET m.boost = COALESCE(m.boost, 1.0) + $delta
+                SET m.boost = MIN(MAX(m.boost, 0.0), 2.0)
             """, {"mem_id": memory_id, "delta": delta})
 
     def close(self):

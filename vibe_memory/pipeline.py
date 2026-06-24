@@ -151,7 +151,7 @@ async def run_ingestion(config: IngestionConfig, summarizer: Optional[Summarizer
                             emotion_tags=extraction.emotion_tags,
                             themes=extraction.themes,
                             timestamp=datetime.now(timezone.utc),
-                            relevance_score=1.0,
+                            boost=1.0,
                             notable_quotes=extraction.notable_quotes,
                         )
                         builder.add_memory(memory, conv.conversation_id)

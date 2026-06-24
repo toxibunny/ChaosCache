@@ -28,7 +28,7 @@ CREATE_CONSTRAINTS = [
     "CREATE INDEX memory_timestamp IF NOT EXISTS FOR (m:Memory) ON (m.timestamp)",
     "CREATE INDEX memory_emotion_tags IF NOT EXISTS FOR (m:Memory) ON (m.emotion_tags)",
     "CREATE INDEX memory_themes IF NOT EXISTS FOR (m:Memory) ON (m.themes)",
-    "CREATE INDEX memory_relevance IF NOT EXISTS FOR (m:Memory) ON (m.relevance_score)",
+    "CREATE INDEX memory_relevance IF NOT EXISTS FOR (m:Memory) ON (m.boost)",
     "CREATE INDEX entity_name_lookup IF NOT EXISTS FOR (e:Entity) ON (e.name)",
     "CREATE INDEX emotion_name_lookup IF NOT EXISTS FOR (em:Emotion) ON (em.name)",
     "CREATE INDEX conversation_time IF NOT EXISTS FOR (c:Conversation) ON (c.create_time)",

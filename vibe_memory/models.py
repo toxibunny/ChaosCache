@@ -25,7 +25,7 @@ class Memory:
     emotion_tags: list[str] = field(default_factory=list)
     themes: list[str] = field(default_factory=list)
     timestamp: Optional[datetime] = None
-    relevance_score: float = 1.0
+    boost: float = 1.0  # Manual modifier (frequency/importance), NOT dynamic relevance
     notable_quotes: list[str] = field(default_factory=list)
 
 

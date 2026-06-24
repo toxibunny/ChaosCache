@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from vibe_memory.models import Memory
+from vibe_memory.retrieval.scorer import RelevanceScorer
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class RetrievalEngine:
         """
         self.driver = driver
         self.serendipity = max(0.0, min(1.0, serendipity))
+        self.scorer = RelevanceScorer()
 
     def retrieve(
         self,
@@ -75,8 +77,17 @@ class RetrievalEngine:
                          "remember", "do", "you"}
             search_terms = [t.strip(".,!?;:") for t in terms if len(t) > 2 and t not in stop_words]
             if search_terms:
-                # Use text search as fallback
-                return self.search_text(search_terms[0], max_results=max_results)
+                # Use the longest term (most likely to be meaningful)
+                best_term = max(search_terms, key=len)
+                memories = self.search_text(best_term, max_results=max_results)
+                # Score and rank by relevance
+                memories = self.scorer.rank(
+                    memories,
+                    query_entities=entities,
+                    query_emotions=emotion_filter,
+                    query_text=context,
+                )
+                return memories
 
         # Recency filtering
         now = datetime.now(timezone.utc).timestamp()
@@ -94,10 +105,10 @@ class RetrievalEngine:
         query = f"""
             MATCH (m:Memory)
             WHERE {where_str}
-            ORDER BY m.relevance_score DESC, m.timestamp DESC
+            ORDER BY m.boost DESC, m.timestamp DESC
             LIMIT $max_results
             RETURN m {{ .memory_id, .text, .summary, .entities, .emotion_tags,
-                        .themes, .timestamp, .relevance_score, .notable_quotes }} AS data
+                        .themes, .timestamp, .boost, .notable_quotes }} AS data
         """
 
         with self.driver.session() as session:
@@ -113,6 +124,15 @@ class RetrievalEngine:
                 if vm.memory_id not in existing_ids and len(memories) < max_results:
                     memories.append(vm)
                     existing_ids.add(vm.memory_id)
+
+        # Score and rank all memories by relevance
+        if entities or context:
+            memories = self.scorer.rank(
+                memories,
+                query_entities=entities,
+                query_emotions=emotion_filter,
+                query_text=context,
+            )
 
         return memories
 
@@ -159,10 +179,10 @@ class RetrievalEngine:
         query = f"""
             MATCH (m:Memory)
             WHERE {where_str}
-            ORDER BY m.relevance_score DESC, m.timestamp DESC
+            ORDER BY m.boost DESC, m.timestamp DESC
             LIMIT $max_results
             RETURN m {{ .memory_id, .text, .summary, .entities, .emotion_tags,
-                        .themes, .timestamp, .relevance_score, .notable_quotes }} AS data
+                        .themes, .timestamp, .boost, .notable_quotes }} AS data
         """
 
         with self.driver.session() as session:
@@ -185,9 +205,9 @@ class RetrievalEngine:
         if sort_by == "recency":
             order_expr = "m.timestamp DESC"
         elif sort_by == "frequency":
-            order_expr = "size(split(m.text, $term)) DESC, m.relevance_score DESC"
+            order_expr = "size(split(m.text, $term)) DESC, m.boost DESC"
         else:
-            order_expr = "m.relevance_score DESC, m.timestamp DESC"
+            order_expr = "m.boost DESC, m.timestamp DESC"
 
         query = f"""
             MATCH (m:Memory)
@@ -196,7 +216,7 @@ class RetrievalEngine:
             ORDER BY {order_expr}
             LIMIT $max_results
             RETURN m {{ .memory_id, .text, .summary, .entities, .emotion_tags,
-                        .themes, .timestamp, .relevance_score, .notable_quotes }} AS data
+                        .themes, .timestamp, .boost, .notable_quotes }} AS data
         """
 
         with self.driver.session() as session:
@@ -210,10 +230,10 @@ class RetrievalEngine:
             WHERE ANY(ent IN $entities WHERE ent IN m1.entities)
               AND m1.memory_id <> m2.memory_id
             WITH m2, count(*) AS connections
-            ORDER BY connections DESC, m2.relevance_score DESC
+            ORDER BY connections DESC, m2.boost DESC
             LIMIT $max_results
             RETURN m2 { .memory_id, .text, .summary, .entities, .emotion_tags,
-                          .themes, .timestamp, .relevance_score, .notable_quotes } AS data
+                          .themes, .timestamp, .boost, .notable_quotes } AS data
         """
         try:
             with self.driver.session() as session:
@@ -241,10 +261,10 @@ class RetrievalEngine:
             MATCH path = m1 {hop_pattern} m2:Memory
             WHERE m1.memory_id <> m2.memory_id
             WITH DISTINCT m2
-            ORDER BY m2.relevance_score DESC
+            ORDER BY m2.boost DESC
             LIMIT $max_results
             RETURN m2 {{ .memory_id, .text, .summary, .entities, .emotion_tags,
-                          .themes, .timestamp, .relevance_score, .notable_quotes }} AS data
+                          .themes, .timestamp, .boost, .notable_quotes }} AS data
         """
         try:
             with self.driver.session() as session:
@@ -259,7 +279,7 @@ class RetrievalEngine:
         with self.driver.session() as session:
             session.run("""
                 MATCH (m:Memory {memory_id: $mem_id})
-                SET m.relevance_score = MIN(COALESCE(m.relevance_score, 1.0) + $delta, 2.0)
+                SET m.boost = MIN(COALESCE(m.boost, 1.0) + $delta, 2.0)
             """, {"mem_id": memory_id, "delta": delta})
 
     def decay_all(self, delta: float = 0.01):
@@ -267,7 +287,7 @@ class RetrievalEngine:
         with self.driver.session() as session:
             session.run("""
                 MATCH (m:Memory)
-                SET m.relevance_score = MAX(COALESCE(m.relevance_score, 1.0) - $delta, 0.0)
+                SET m.boost = MAX(COALESCE(m.boost, 1.0) - $delta, 0.0)
             """, {"delta": delta})
 
     def _record_to_memory(self, data: dict) -> Memory:
@@ -286,7 +306,7 @@ class RetrievalEngine:
             emotion_tags=data.get("emotion_tags", []),
             themes=data.get("themes", []),
             timestamp=ts,
-            relevance_score=data.get("relevance_score", 1.0),
+            boost=data.get("boost", 1.0),
             notable_quotes=data.get("notable_quotes", []),
         )
 

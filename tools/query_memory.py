@@ -71,7 +71,7 @@ async def main():
                 "emotion_tags": mem.emotion_tags,
                 "entities": mem.entities,
                 "notable_quotes": mem.notable_quotes or [],
-                "relevance_score": mem.relevance_score,
+                "boost": mem.boost,
             })
 
         print(json.dumps(result))
