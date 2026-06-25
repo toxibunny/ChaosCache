@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibe-memory"
+version = "0.1.0"
+description = "Memory graph for AI companion bots — vibes, emotions, inside jokes"
+keywords = ["pi-package", "memory", "knowledge-graph", "llm"]
+
+[project.pi]
+extensions = ["./.pi/extensions/vibe-memory.ts"]
+requires-python = ">=3.10"
+dependencies = [
+    "neo4j>=5.0",
+    "llama-cpp-python>=0.2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+]
+ollama = ["ollama>=0.1"]
+openai = ["openai>=1.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
